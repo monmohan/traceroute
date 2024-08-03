@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -13,13 +14,35 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+var verbose *bool
+
+func debugPrint(v ...interface{}) {
+	if *verbose {
+		fmt.Println(v...)
+	}
+}
+
 func main() {
-	// Get the IP address to ping
-	if len(os.Args) != 2 {
-		fmt.Println("Usage: ping [ip_address]")
+	verbose = flag.Bool("verbose", false, "enable verbose output")
+	maxHops := flag.Int("maxHops", 64, "number of hops")
+	flag.Parse()
+	if *verbose {
+		fmt.Println("Verbose mode enabled")
+	}
+
+	if *maxHops < 1 {
+		log.Println("Invalid number of hops, setting to default 64")
+		*maxHops = 64
+	}
+
+	args := flag.Args()
+	if len(args) != 1 {
+		fmt.Println("Usage: tcptrace [ip_address]")
 		return
 	}
-	ipAddr := os.Args[1]
+	// Get the IP address to trace
+
+	ipAddr := args[0]
 
 	// Resolve the IP address
 	addr, err := net.ResolveIPAddr("ip4", ipAddr)
@@ -27,34 +50,33 @@ func main() {
 		fmt.Println("Failed to resolve IP address:", err)
 		return
 	}
-	// Open a raw socket for sending/receiving ICMP messages
-	conn, err := setUpICMPListener()
-	if err != nil {
-		fmt.Println("Failed to open ICMP socket:", err)
-		return
-	}
+	fmt.Println("Resolved IP address:", addr)
+	laddr := GetOutboundIP()
 
-	defer conn.Close()
-
-	ttl := 1
-
-	//run in loop until destination is reached or max TTL is reached
-	for ttl <= 30 {
-		peer, err := runICMPProbe(conn, ttl, addr)
+	for ttl := 1; ttl <= *maxHops; ttl++ {
+		retAddr, err := runICMPProbe(addr, laddr, ttl)
 		if err != nil {
-			fmt.Println("Failed to probe:", err)
-
+			fmt.Println(err)
+			continue
 		}
-		if peer != nil && peer.String() == addr.String() {
-			fmt.Println("Reached destination, hops needed to reach destination:", ttl)
+
+		if retAddr.String() == addr.IP.String() {
 			break
 		}
-		ttl++
 	}
+
+	fmt.Println("Done..")
 
 }
 
-func runICMPProbe(conn *icmp.PacketConn, ttl int, addr *net.IPAddr) (net.Addr, error) {
+func runICMPProbe(addr *net.IPAddr, laddr net.IP, ttl int) (net.Addr, error) {
+
+	conn, err := icmp.ListenPacket("ip4:icmp", laddr.String())
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
 	conn.IPv4PacketConn().SetTTL(ttl)
 
 	icmpMsg := icmp.Message{
@@ -63,7 +85,7 @@ func runICMPProbe(conn *icmp.PacketConn, ttl int, addr *net.IPAddr) (net.Addr, e
 		Body: &icmp.Echo{
 			ID:   os.Getpid() & 0xffff,
 			Seq:  1,
-			Data: []byte("Go Ping"),
+			Data: []byte("PING.."),
 		},
 	}
 
@@ -76,20 +98,11 @@ func runICMPProbe(conn *icmp.PacketConn, ttl int, addr *net.IPAddr) (net.Addr, e
 		return nil, fmt.Errorf("failed to send ICMP message: %v", err)
 
 	}
+	fmt.Print("Sent ICMP probe to ", addr, " with TTL ", ttl, " ")
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	return readICMPResponse(conn)
 
-}
-
-func setUpICMPListener() (*icmp.PacketConn, error) {
-	// Open a raw socket for ICMP messages
-	conn, err := icmp.ListenPacket("ip4:icmp", GetOutboundIP().String())
-	if err != nil {
-		fmt.Println("Failed to open ICMP socket:", err)
-		return nil, err
-	}
-	return conn, nil
 }
 
 func readICMPResponse(conn *icmp.PacketConn) (net.Addr, error) {
@@ -107,19 +120,19 @@ func readICMPResponse(conn *icmp.PacketConn) (net.Addr, error) {
 
 	}
 	icmpPacket, _ := icmpLayer.(*layers.ICMPv4)
-	fmt.Printf("Reply from %v: ", peer)
+	debugPrint("Reply from : ", peer)
 
-	fmt.Printf("Type: %v, Code: %v, ID: %v, Seq: %v, ", icmpPacket.TypeCode.Type(), icmpPacket.TypeCode.Code(), icmpPacket.Id, icmpPacket.Seq)
+	debugPrint(fmt.Sprintf("Type: %v, Code: %v, ID: %v, Seq: %v, ", icmpPacket.TypeCode.Type(), icmpPacket.TypeCode.Code(), icmpPacket.Id, icmpPacket.Seq))
 
 	switch icmpPacket.TypeCode.Type() {
 	case layers.ICMPv4TypeEchoReply:
-		fmt.Println("Echo reply")
+		fmt.Println("Echo reply from peer ", peer)
 	case layers.ICMPv4TypeDestinationUnreachable:
-		fmt.Println("Destination unreachable")
+		debugPrint("Destination unreachable")
 	case layers.ICMPv4TypeTimeExceeded:
-		fmt.Println("Time exceeded")
+		fmt.Println("Time exceeded from peer ", peer)
 	default:
-		fmt.Println("Unknown")
+		debugPrint("Unknown")
 	}
 	return peer, nil
 
