@@ -14,7 +14,7 @@ import (
 	"github.com/google/gopacket/pcap"
 )
 
-const timeout = time.Duration(20 * time.Second)
+const timeout = time.Duration(10 * time.Second)
 
 var verbose *bool
 
@@ -28,6 +28,7 @@ func main() {
 
 	verbose = flag.Bool("verbose", false, "enable verbose output")
 	maxHops := flag.Int("maxHops", 64, "number of hops")
+	port := flag.Int("port", 80, "Port to send TCP SYN packets")
 	flag.Parse()
 	if *verbose {
 		fmt.Println("Verbose mode enabled")
@@ -61,8 +62,8 @@ func main() {
 	done := make(chan struct{})
 
 	//go setUpICMPListener("en0", fmt.Sprintf("icmp and src host %s", addr.String()))
-	go setUpICMPListener("en0", fmt.Sprintf("icmp or (tcp  and host %s)", addr.String()), icmpChan, tcpChan, done)
-	go probe(addr, uint16(80), *maxHops, icmpChan, tcpChan, done)
+	go setUpICMPListener("any", fmt.Sprintf("icmp or (tcp  and host %s)", addr.String()), icmpChan, tcpChan, done)
+	go probe(addr, uint16(*port), *maxHops, icmpChan, tcpChan, done)
 
 	<-done
 	fmt.Println("Done..")
@@ -90,6 +91,7 @@ func probe(addr *net.IPAddr, port uint16, maxHops int, icmpChan chan struct{}, t
 		case <-tcpChan: // Wait for ICMP Packet Read
 			debugPrint("TCP Send: Received ICMP Channel Signal")
 		case <-time.After(timeout):
+			fmt.Println("  * * * Timeout while waiting for ICMP Packet * * * ")
 			debugPrint("TCP Send: Timeout while waiting for ICMP Channel, continue to next probe")
 
 		}
@@ -156,7 +158,7 @@ func sendSyn(destIp *net.IPAddr, port uint16, ttl int) error {
 		return err
 	}
 
-	fmt.Println("Packet sent successfully with TTL ", ttl)
+	fmt.Print("Packet sent with TTL : ", ttl)
 
 	return nil
 
@@ -210,7 +212,7 @@ func setUpICMPListener(dev string, filter string, icmpChan chan struct{}, tcpCha
 		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
 			if isTCPAck(packet) {
 				{
-					debugPrint("ICMP Listener: Got TCP ACK Packet, we are done")
+					fmt.Println("Got TCP ACK Packet from : ", packet.NetworkLayer().NetworkFlow().Src())
 					done <- struct{}{}
 					return
 				}
@@ -225,7 +227,7 @@ func setUpICMPListener(dev string, filter string, icmpChan chan struct{}, tcpCha
 		}
 
 		if src := getICMPInfo(packet); src != "" {
-			fmt.Println(src)
+			fmt.Println("  ICMP Packet Received from : ", src)
 		}
 
 		select {
