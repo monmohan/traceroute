@@ -1,4 +1,4 @@
-package main
+package icmp
 
 import (
 	"flag"
@@ -14,53 +14,28 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-var verbose *bool
+var dbg bool
 
 func debugPrint(v ...interface{}) {
-	if *verbose {
+	if dbg {
 		fmt.Println(v...)
 	}
 }
 
-func main() {
-	verbose = flag.Bool("verbose", false, "enable verbose output")
-	maxHops := flag.Int("maxHops", 64, "number of hops")
+func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
+	dbg = verbose
 	flag.Parse()
-	if *verbose {
-		fmt.Println("Verbose mode enabled")
-	}
 
-	if *maxHops < 1 {
-		log.Println("Invalid number of hops, setting to default 64")
-		*maxHops = 64
-	}
-
-	args := flag.Args()
-	if len(args) != 1 {
-		fmt.Println("Usage: tcptrace [ip_address]")
-		return
-	}
-	// Get the IP address to trace
-
-	ipAddr := args[0]
-
-	// Resolve the IP address
-	addr, err := net.ResolveIPAddr("ip4", ipAddr)
-	if err != nil {
-		fmt.Println("Failed to resolve IP address:", err)
-		return
-	}
-	fmt.Println("Resolved IP address:", addr)
 	laddr := GetOutboundIP()
 
-	for ttl := 1; ttl <= *maxHops; ttl++ {
-		retAddr, err := runICMPProbe(addr, laddr, ttl)
+	for ttl := 1; ttl <= maxHops; ttl++ {
+		retAddr, err := runICMPProbe(ipAddr, laddr, ttl)
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
 
-		if retAddr.String() == addr.IP.String() {
+		if retAddr.String() == ipAddr.IP.String() {
 			break
 		}
 	}
@@ -109,7 +84,8 @@ func readICMPResponse(conn *icmp.PacketConn) (net.Addr, error) {
 	reply := make([]byte, 1500)
 	n, peer, err := conn.ReadFrom(reply)
 	if err != nil {
-		return nil, fmt.Errorf("failed to receive ICMP reply: %v", err)
+		debugPrint(`failed to receive ICMP reply:`, err)
+		return nil, fmt.Errorf("Failed to receive ICMP reply")
 
 	}
 

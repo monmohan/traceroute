@@ -1,7 +1,6 @@
-package main
+package tcp
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"math/rand"
@@ -16,54 +15,25 @@ import (
 
 const timeout = time.Duration(10 * time.Second)
 
-var verbose *bool
+var dbg bool
 
 func debugPrint(v ...interface{}) {
-	if *verbose {
+	if dbg {
 		fmt.Println(v...)
 	}
 }
 
-func main() {
+func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr, port int) {
 
-	verbose = flag.Bool("verbose", false, "enable verbose output")
-	maxHops := flag.Int("maxHops", 64, "number of hops")
-	port := flag.Int("port", 80, "Port to send TCP SYN packets")
-	flag.Parse()
-	if *verbose {
-		fmt.Println("Verbose mode enabled")
-	}
-
-	if *maxHops < 1 {
-		log.Println("Invalid number of hops, setting to default 64")
-		*maxHops = 64
-	}
-
-	args := flag.Args()
-	if len(args) != 1 {
-		fmt.Println("Usage: tcptrace [ip_address]")
-		return
-	}
-	// Get the IP address to trace
-
-	ipAddr := args[0]
-
-	// Resolve the IP address
-	addr, err := net.ResolveIPAddr("ip4", ipAddr)
-	if err != nil {
-		fmt.Println("Failed to resolve IP address:", err)
-		return
-	}
-	fmt.Println("Resolved IP address:", addr)
+	dbg = verbose
 
 	//set up sync channels
 	icmpChan := make(chan struct{})
 	tcpChan := make(chan struct{})
 	done := make(chan struct{})
 
-	//go setUpICMPListener("en0", fmt.Sprintf("icmp and src host %s", addr.String()))
-	go setUpICMPListener("any", fmt.Sprintf("icmp or (tcp  and host %s)", addr.String()), icmpChan, tcpChan, done)
-	go probe(addr, uint16(*port), *maxHops, icmpChan, tcpChan, done)
+	go setUpICMPListener("any", fmt.Sprintf("icmp or (tcp  and host %s)", ipAddr), icmpChan, tcpChan, done)
+	go probe(ipAddr, uint16(port), maxHops, icmpChan, tcpChan, done)
 
 	<-done
 	fmt.Println("Done..")
@@ -203,32 +173,8 @@ func setUpICMPListener(dev string, filter string, icmpChan chan struct{}, tcpCha
 			return
 		}
 		debugPrint("ICMP Listener: Trying to get next Packet")
-		packet, err := packetSource.NextPacket()
-		debugPrint("ICMP Listener: Received Packet")
-		if err != nil {
-			debugPrint("Failed to get next packet:", err)
-		}
 		//toggle on layer type
-		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
-			if isTCPAck(packet) {
-				{
-					fmt.Println("Got TCP ACK Packet from : ", packet.NetworkLayer().NetworkFlow().Src())
-					done <- struct{}{}
-					return
-				}
-			}
-			debugPrint("ICMP Listener: Continue to wait for ICMP Packet")
-			packet, err = packetSource.NextPacket()
-			if err != nil {
-				debugPrint("Failed to get next packet:", err)
-			}
-			debugPrint("ICMP Listener: Received Packet")
-
-		}
-
-		if src := getICMPInfo(packet); src != "" {
-			fmt.Println("  ICMP Packet Received from : ", src)
-		}
+		waitForICMPorACK(packetSource, done)
 
 		select {
 		case tcpChan <- struct{}{}: // Signal TCP request send
@@ -243,11 +189,39 @@ func setUpICMPListener(dev string, filter string, icmpChan chan struct{}, tcpCha
 
 }
 
+func waitForICMPorACK(packetSource *gopacket.PacketSource, done chan struct{}) {
+	for {
+		packet, err := packetSource.NextPacket()
+		debugPrint(fmt.Sprintf("ICMP Listener: Received Packet %s", packet))
+		if err != nil {
+			debugPrint("Failed to get next packet:", err)
+		}
+
+		if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {
+			if isTCPAck(packet) {
+				{
+					fmt.Println(" Got TCP ACK Packet from : ", packet.NetworkLayer().NetworkFlow().Src())
+					done <- struct{}{}
+					return
+				}
+			}
+			debugPrint("ICMP Listener: Continue to wait for ICMP Packet")
+
+		} else {
+			if src := getICMPInfo(packet); src != "" {
+				fmt.Println("  ICMP Packet Received from : ", src)
+				return
+			}
+		}
+
+	}
+
+}
+
 func isTCPAck(packet gopacket.Packet) bool {
 	tcpLayer := packet.Layer(layers.LayerTypeTCP)
 	if tcpLayer != nil {
 		tcp, _ := tcpLayer.(*layers.TCP)
-		debugPrint(packet)
 		//print syn ISN
 		debugPrint("SYN ISN: ", tcp.Seq)
 		//print ack ISN
