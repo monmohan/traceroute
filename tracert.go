@@ -13,8 +13,10 @@ import (
 func main() {
 	verbose := flag.Bool("verbose", false, "Enable verbose output")
 	port := flag.Int("port", 80, "Port number when using TCP protocol")
-	maxHops := flag.Int("maxHops", 0, "Maximum number of hops")
+	maxHops := flag.Int("maxHops", 64, "Maximum number of hops")
 	proto := flag.String("proto", "icmp", "Protocol to use: 'tcp' or 'icmp'")
+	iface := flag.String("iface", "any", `Interface to listen on. By default the program attempts to listens on all interfaces however it may not work on all platforms. 
+	Provide the specific interface name if you face issues`)
 
 	flag.Parse()
 	if *maxHops < 1 {
@@ -42,7 +44,7 @@ func main() {
 		icmp.Trace(*verbose, *maxHops, addr)
 
 	case "tcp":
-		tcp.Trace(*verbose, *maxHops, addr, *port)
+		tcp.Trace(*iface, *verbose, *maxHops, addr, *port)
 
 	default:
 		fmt.Printf("Invalid Protocol specified: %s\n", *proto)
