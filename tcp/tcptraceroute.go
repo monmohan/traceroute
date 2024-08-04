@@ -23,7 +23,7 @@ func debugPrint(v ...interface{}) {
 	}
 }
 
-func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr, port int) {
+func Trace(iface string, verbose bool, maxHops int, ipAddr *net.IPAddr, port int) {
 
 	dbg = verbose
 
@@ -32,7 +32,7 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr, port int) {
 	tcpChan := make(chan struct{})
 	done := make(chan struct{})
 
-	go setUpICMPListener("any", fmt.Sprintf("icmp or (tcp  and host %s)", ipAddr), icmpChan, tcpChan, done)
+	go setUpICMPListener(iface, fmt.Sprintf("icmp or (tcp  and host %s)", ipAddr), icmpChan, tcpChan, done)
 	go probe(ipAddr, uint16(port), maxHops, icmpChan, tcpChan, done)
 
 	<-done
