@@ -28,10 +28,16 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
 	flag.Parse()
 
 	laddr := GetOutboundIP()
+	conn, err := icmp.ListenPacket("ip4:icmp", laddr.String())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer conn.Close()
 
 	for ttl := 1; ttl <= maxHops; ttl++ {
 		debugPrint("-------------------Start Probe with TTL ", ttl, "-------------------")
-		retAddr, err := runICMPProbe(ipAddr, laddr, ttl)
+		retAddr, err := runICMPProbe(conn, ipAddr, laddr, ttl)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -47,14 +53,8 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
 
 }
 
-func runICMPProbe(addr *net.IPAddr, laddr net.IP, ttl int) (net.Addr, error) {
-
-	conn, err := icmp.ListenPacket("ip4:icmp", laddr.String())
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-
+func runICMPProbe(conn *icmp.PacketConn, addr *net.IPAddr, laddr net.IP, ttl int) (net.Addr, error) {
+	// Set the TTL for the connection
 	conn.IPv4PacketConn().SetTTL(ttl)
 	echoRequest := &icmp.Echo{
 		ID:   os.Getpid() & 0xffff,
