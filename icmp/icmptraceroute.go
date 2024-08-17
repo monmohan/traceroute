@@ -37,7 +37,8 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
 
 	for ttl := 1; ttl <= maxHops; ttl++ {
 		debugPrint("-------------------Start Probe with TTL ", ttl, "-------------------")
-		retAddr, err := runICMPProbe(conn, ipAddr, laddr, ttl)
+
+		retAddr, err := runICMPProbe(conn, ipAddr, ttl)
 		if err != nil {
 			fmt.Println(err)
 			continue
@@ -53,7 +54,8 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
 
 }
 
-func runICMPProbe(conn *icmp.PacketConn, addr *net.IPAddr, laddr net.IP, ttl int) (net.Addr, error) {
+func runICMPProbe(conn *icmp.PacketConn, addr *net.IPAddr, ttl int) (net.Addr, error) {
+	start := time.Now()
 	// Set the TTL for the connection
 	conn.IPv4PacketConn().SetTTL(ttl)
 	echoRequest := &icmp.Echo{
@@ -86,11 +88,11 @@ func runICMPProbe(conn *icmp.PacketConn, addr *net.IPAddr, laddr net.IP, ttl int
 	fmt.Println("Sent ICMP Echo Request to ", addr, " with TTL/Seq ", ttl)
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	return readICMPResponse(conn, echoRequest)
+	return readICMPResponse(conn, echoRequest, start)
 
 }
 
-func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo) (net.Addr, error) {
+func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo, start time.Time) (net.Addr, error) {
 	reply := make([]byte, 1500)
 	n, peer, err := conn.ReadFrom(reply)
 	if err != nil {
@@ -130,6 +132,7 @@ func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo) (net.Addr, 
 		// For Echo Reply, ID and Seq are directly available in the ICMP header
 		if icmpPacket.Id == uint16(echoRequest.ID) && icmpPacket.Seq == uint16(echoRequest.Seq) {
 			debugPrint("Found original message in Echo Reply, ID and Sequence match\n")
+			fmt.Println("Time taken: ", time.Since(start))
 		} else {
 			fmt.Println("IGNORE: Echo Reply does not match original message")
 		}
@@ -137,7 +140,7 @@ func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo) (net.Addr, 
 	case layers.ICMPv4TypeDestinationUnreachable:
 		debugPrint("Destination unreachable")
 	case layers.ICMPv4TypeTimeExceeded:
-		fmt.Println("Time exceeded from peer ", peer)
+		fmt.Println("ICMP Time exceeded resopnse from peer ", peer)
 
 		if len(icmpPacket.Payload) >= 28 { // 20 bytes IP header + 8 bytes original ICMP header
 			// Get the IP header length
@@ -157,6 +160,7 @@ func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo) (net.Addr, 
 				debugPrint(fmt.Sprintf("Data read from ICMP Response => Code: %d, Checksum: %d, ID: %d, Sequence: %d", code, checksum, id, seq))
 				if id == uint16(echoRequest.ID) && seq == uint16(echoRequest.Seq) {
 					debugPrint(fmt.Sprintf("Found original message in Time Exceeded payload, ID %d and Sequence %d match\n ", id, seq))
+					fmt.Println("Duration: ", time.Since(start))
 				} else {
 					fmt.Println("IGNORE: Time Exceeded payload does not match original message")
 				}
