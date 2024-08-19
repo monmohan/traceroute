@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-func TestNewTreeReader(t *testing.T) {
+func TestNewRangeReader(t *testing.T) {
 	// write test case for NewASN
 	// read the testdata/asn.csv file
-	file, err := os.Open("/Users/singhmo/CSPrimer/Networking/IP_ICMP/ip2asn-v4.tsv")
+	file, err := os.Open("./ip2asn-v4.tsv")
 	if err != nil {
 		t.Fatalf("failed to open file: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestNewTreeReader(t *testing.T) {
 func TestFindASN(t *testing.T) {
 	// write test case for FindASN
 	// read the testdata/asn.csv file
-	file, err := os.Open("/Users/singhmo/CSPrimer/Networking/IP_ICMP/ip2asn-v4.tsv")
+	file, err := os.Open("./ip2asn-v4.tsv")
 	if err != nil {
 		t.Fatalf("failed to open file: %v", err)
 	}

@@ -6,9 +6,10 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 )
 
-type ASNQuery interface {
+type Query interface {
 	FindASN(ip string) (ASNData, error)
 }
 type ASNData struct {
@@ -19,7 +20,7 @@ type ASNData struct {
 }
 
 type Reader interface {
-	ReadAll(input *csv.Reader) ASNQuery
+	ReadAll(input *csv.Reader) Query
 }
 
 type RangeReader struct {
@@ -89,6 +90,19 @@ func (rr *RangeReader) FindASN(ip string) (ASNData, error) {
 		}
 	}
 	return ASNData{}, fmt.Errorf("no ASN found: %s", ip)
+}
+
+func LoadLocal() Query {
+	file, err := os.Open("./asn/ip2asn-v4.tsv")
+	if err != nil {
+		log.Fatalf("failed to open file: %v", err)
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+	reader.Comma = '\t'
+	asnObj := NewRangeReader()
+	asnObj.ReadAll(reader)
+	return asnObj
 }
 
 ////////////// ----This reader implementation was experiment. RangeReader is the correct implementation//////////////
