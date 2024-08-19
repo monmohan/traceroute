@@ -11,11 +11,13 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"github.com/monmohan/traceroute/asn"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
 
 var dbg bool
+var asnQuery asn.Query
 
 func debugPrint(v ...interface{}) {
 	if dbg {
@@ -34,6 +36,7 @@ func Trace(verbose bool, maxHops int, ipAddr *net.IPAddr) {
 		return
 	}
 	defer conn.Close()
+	asnQuery = asn.LoadLocal()
 
 	for ttl := 1; ttl <= maxHops; ttl++ {
 		debugPrint("-------------------Start Probe with TTL ", ttl, "-------------------")
@@ -85,7 +88,7 @@ func runICMPProbe(conn *icmp.PacketConn, addr *net.IPAddr, ttl int) (net.Addr, e
 		return nil, fmt.Errorf("failed to send ICMP message: %v", err)
 
 	}
-	fmt.Println("Sent ICMP Echo Request to ", addr, " with TTL/Seq ", ttl)
+	fmt.Println("Sent ICMP Echo Request with TTL/Seq ", ttl)
 
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	return readICMPResponse(conn, echoRequest, start)
@@ -140,7 +143,7 @@ func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo, start time.
 	case layers.ICMPv4TypeDestinationUnreachable:
 		debugPrint("Destination unreachable")
 	case layers.ICMPv4TypeTimeExceeded:
-		fmt.Println("ICMP Time exceeded resopnse from peer ", peer)
+		fmt.Println("ICMP Time exceeded resopnse from ", peer)
 
 		if len(icmpPacket.Payload) >= 28 { // 20 bytes IP header + 8 bytes original ICMP header
 			// Get the IP header length
@@ -163,6 +166,12 @@ func readICMPResponse(conn *icmp.PacketConn, echoRequest *icmp.Echo, start time.
 					fmt.Println("Duration: ", time.Since(start))
 				} else {
 					fmt.Println("IGNORE: Time Exceeded payload does not match original message")
+				}
+				asndata, err := asnQuery.FindASN(peer.String())
+				if err != nil {
+					fmt.Println("Failed to find ASN: ", err)
+				} else {
+					fmt.Println("ASN: ", asndata.ASNNumber, " ", asndata.ASName, " ", asndata.CountryCode)
 				}
 
 			} else {
